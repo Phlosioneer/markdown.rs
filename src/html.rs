@@ -1,6 +1,6 @@
 use parser::Block;
 use parser::Block::{
-    Blockquote, CodeBlock, Header, Hr, LinkReference, OrderedList, Paragraph, Raw, UnorderedList,
+    Blockquote, CodeBlock, Header, Hr, LinkReference, OrderedList, Paragraph, UnorderedList,
 };
 use parser::Span::{Break, Code, Emphasis, Image, Link, Literal, RefLink, Strong, Text};
 use parser::{ListItem, OrderedListType, Span};
@@ -8,34 +8,6 @@ use regex::Regex;
 use std::collections::HashMap;
 
 type LinkReferenceMap<'a> = HashMap<&'a str, (&'a str, Option<&'a str>)>;
-
-// takes a number of elements and returns their collective text as a slug
-fn slugify(elements: &[Span], no_spaces: bool) -> String {
-    let mut ret = String::new();
-
-    for el in elements {
-        let next = match *el {
-            Break => "".to_owned(),
-            Literal(character) => character.to_string(),
-            Text(ref text) => text.trim().to_lowercase(),
-            Image(ref text, _, _) | Code(ref text) => text.trim().to_lowercase(),
-            RefLink(ref content, _, _)
-            | Link(ref content, _, _)
-            | Strong(ref content)
-            | Emphasis(ref content) => slugify(content, no_spaces),
-        };
-        if !ret.is_empty() {
-            ret.push('_');
-        }
-        ret.push_str(&next);
-    }
-
-    if no_spaces {
-        ret = ret.replace(" ", "_");
-    }
-
-    ret
-}
 
 pub fn to_html(blocks: &[Block]) -> String {
     let mut ret = String::new();
@@ -59,7 +31,8 @@ pub fn to_html(blocks: &[Block]) -> String {
                 format_ordered_list(elements, num_type, &link_references)
             }
             LinkReference(_, _, _) => "".to_owned(),
-            Raw(elements) => elements.to_string(),
+            #[allow(deprecated)]
+            Block::Raw(elements) => elements.to_string(),
             Hr => format!("<hr />\n\n"),
         };
         ret.push_str(&next)
@@ -88,7 +61,7 @@ fn format_spans(elements: &[Span], link_references: &LinkReferenceMap) -> String
                 &escape(title, true),
                 format_spans(content, link_references)
             ),
-            RefLink(ref content, ref reference, ref raw) => {
+            RefLink(ref content, ref reference) => {
                 if let Some((ref url, None)) = link_references.get::<str>(reference) {
                     format!(
                         "<a href=\"{}\">{}</a>",
@@ -104,25 +77,11 @@ fn format_spans(elements: &[Span], link_references: &LinkReferenceMap) -> String
                         &escape(title, true),
                         format_spans(content, link_references)
                     )
-                } else if let Some((ref url, None)) =
-                    link_references.get::<str>(&slugify(content, false))
-                {
-                    format!(
-                        "<a href=\"{}\">{}</a>",
-                        &escape(url, false),
-                        format_spans(content, link_references)
-                    )
-                } else if let Some((ref url, Some(ref title))) =
-                    link_references.get::<str>(&slugify(content, false))
-                {
-                    format!(
-                        "<a href=\"{}\" title=\"{}\">{}</a>",
-                        &escape(url, false),
-                        &escape(title, true),
-                        format_spans(content, link_references)
-                    )
                 } else {
-                    raw.to_string()
+                    format!(
+                        "<a href=\"\">{}</a>",
+                        format_spans(content, link_references)
+                    )
                 }
             }
             Image(ref text, ref url, None) => format!(
@@ -237,9 +196,8 @@ fn format_paragraph(elements: &[Span], link_references: &LinkReferenceMap) -> St
 
 fn format_header(elements: &[Span], level: usize, link_references: &LinkReferenceMap) -> String {
     format!(
-        "<h{} id='{}'>{}</h{}>\n\n",
+        "<h{}>{}</h{}>\n\n",
         level,
-        slugify(elements, true),
         format_spans(elements, link_references),
         level
     )

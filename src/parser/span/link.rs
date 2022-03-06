@@ -70,13 +70,11 @@ pub fn parse_link(text: &str) -> Option<(Span, usize)> {
         } else if let Some(reference) = caps.name("ref") {
             let reference = reference.as_str().trim().to_lowercase();
 
-            return Some((RefLink(parse_spans(&content), reference, raw_content), raw_content.len()));
-        } else {
-            // Leave the reference empty, the HTML generating code will try to match both reference
-            // and slugified content.
-            let reference = "".to_owned();
-
-            return Some((RefLink(parse_spans(&content), reference, raw_content), raw_content.len()));
+            return Some((RefLink(parse_spans(&content), reference), raw_content.len()));
+        } else if content.trim().len() != 0 {
+            // Implicitly use the content as a reference.
+            let reference = content.trim().to_lowercase();
+            return Some((RefLink(parse_spans(&content), reference), raw_content.len()));
         }
     }
     None
@@ -106,8 +104,7 @@ mod test {
             Some((
                 RefLink(
                     vec![Text("an example")],
-                    "example".to_owned(),
-                    "[an example][example]"
+                    "example".to_owned()
                 ),
                 21
             ))
@@ -131,17 +128,7 @@ mod test {
             Some((Link(vec![], "", None), 4))
         );
 
-        assert_eq!(
-            parse_link("[()] test"),
-            Some((
-                RefLink(
-                    vec![Text("()")],
-                    "".to_owned(),
-                    "[()]"
-                ),
-                4
-            ))
-        );
+        
 
         assert_eq!(
             parse_link("[an example](example.com \"Title\") test"),
@@ -187,9 +174,7 @@ mod test {
             Some((
                 Link(
                     vec![
-                        Text("huh"),
-                        RefLink(vec![], "".to_owned(), "[]"),
-                        Text("wow")
+                        Text("huh[]wow")
                     ],
                     "example.com",
                     None
@@ -232,8 +217,7 @@ mod test {
             Some((
                 RefLink(
                     vec![Text("an example")],
-                    "example".to_owned(),
-                    "[an example]      [example]"
+                    "example".to_owned()
                 ),
                 27
             ))
