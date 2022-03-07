@@ -69,8 +69,6 @@ impl<'a> IntoLineInfo for Block<'a> {
             OrderedList(items, _) |
             UnorderedList(items) => items.into_line_info(original),
             Hr => None,
-            #[allow(deprecated)]
-            Raw(s) => s.into_line_info(original)
         }
     }
 }

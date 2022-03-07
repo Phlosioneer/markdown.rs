@@ -38,8 +38,6 @@ fn gen_block(b: Block) -> String {
         UnorderedList(x) => generate_from_li(x),
         LinkReference(id, url, None) => format!("[{}]: {}", id, url),
         LinkReference(id, url, Some(title)) => format!("[{}]: {} \"{}\"", id, url, title),
-        #[allow(deprecated)]
-        Raw(x) => x.to_string(),
         Hr => "===".to_owned(),
     }
 }

@@ -31,8 +31,6 @@ pub fn to_html(blocks: &[Block]) -> String {
                 format_ordered_list(elements, num_type, &link_references)
             }
             LinkReference(_, _, _) => "".to_owned(),
-            #[allow(deprecated)]
-            Block::Raw(elements) => elements.to_string(),
             Hr => format!("<hr />\n\n"),
         };
         ret.push_str(&next)
