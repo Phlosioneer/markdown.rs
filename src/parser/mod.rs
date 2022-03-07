@@ -1,6 +1,10 @@
 
 mod block;
 mod span;
+mod line_info;
+
+pub use self::line_info::LineInfo;
+use self::line_info::IntoLineInfo;
 
 pub fn parse(md: &str) -> Vec<Block> {
     block::parse_blocks(md)
@@ -114,23 +118,6 @@ pub enum Block<'a> {
     Raw(&'a str),
 }
 
-/// Quick boolean variant checks.
-#[allow(missing_docs)]
-impl<'a> Block<'a> {
-    pub fn is_header(&self) -> bool { matches!(self, Block::Header(_, _)) }
-    pub fn is_paragraph(&self) -> bool { matches!(self, Block::Paragraph(_)) }
-    pub fn is_block_quote(&self) -> bool { matches!(self, Block::Blockquote(_)) }
-    pub fn is_code(&self) -> bool { matches!(self, Block::CodeBlock(_, _)) }
-    pub fn is_link(&self) -> bool { matches!(self, Block::LinkReference(_, _, _)) }
-    pub fn is_ordered_list(&self) -> bool { matches!(self, Block::OrderedList(_, _)) }
-    pub fn is_unordered_list(&self) -> bool { matches!(self, Block::UnorderedList(_)) }
-    pub fn is_hr(&self) -> bool { matches!(self, Block::Hr) }
-
-    #[deprecated]
-    #[allow(deprecated)]
-    pub fn is_raw(&self) -> bool { matches!(self, Block::Raw(_)) }
-}
-
 impl<'a> Block<'a> {
     /// Combine the lines of a codeblock with newlines. They're stored as
     /// separate lines to avoid the allocation, this method performs that
@@ -178,6 +165,20 @@ impl<'a> Block<'a> {
             Block::Raw(_) => panic!("Raw is depricated")
         }
     }
+
+    /// This function will produce Undefined Behavior unless `original`
+    /// comes from the EXACT SAME allocated object as the string slice that
+    /// was passed to the parser.
+    /// 
+    /// This function may produce junk results unless `original` is a slice
+    /// over the same indices as the slice passed to the parser, or it may
+    /// return None.
+    /// 
+    /// This function will return None if the block or span only contains
+    /// static strings.
+    pub unsafe fn get_line_info(&self, original: &str) -> Option<LineInfo> {
+        self.into_line_info(original)
+    }
 }
 
 /// Single item inside of a list.
@@ -202,6 +203,20 @@ impl<'a> ListItem<'a> {
                 blocks.iter().map(|b| b.to_owned()).collect()
             )
         }
+    }
+
+    /// This function will produce Undefined Behavior unless `original`
+    /// comes from the EXACT SAME allocated object as the string slice that
+    /// was passed to the parser.
+    /// 
+    /// This function may produce junk results unless `original` is a slice
+    /// over the same indices as the slice passed to the parser, or it may
+    /// return None.
+    /// 
+    /// This function will return None if the block or span only contains
+    /// static strings.
+    pub unsafe fn get_line_info(&self, original: &str) -> Option<LineInfo> {
+        self.into_line_info(original)
     }
 }
 
@@ -247,20 +262,6 @@ pub enum Span<'a> {
     Strong(Vec<Span<'a>>),
 }
 
-/// Quick boolean variant checks.
-#[allow(missing_docs)]
-impl<'a> Span<'a> {
-    pub fn is_break(&self) -> bool { matches!(self, Span::Break) }
-    pub fn is_text(&self) -> bool { matches!(self, Span::Text(_)) }
-    pub fn is_code(&self) -> bool { matches!(self, Span::Code(_)) }
-    pub fn is_literal(&self) -> bool { matches!(self, Span::Literal(_)) }
-    pub fn is_link(&self) -> bool { matches!(self, Span::Link(_, _, _)) }
-    pub fn is_ref_link(&self) -> bool { matches!(self, Span::RefLink(_, _)) }
-    pub fn is_image(&self) -> bool { matches!(self, Span::Image(_, _, _)) }
-    pub fn is_emphasis(&self) -> bool { matches!(self, Span::Emphasis(_)) }
-    pub fn is_strong(&self) -> bool { matches!(self, Span::Strong(_)) }
-}
-
 impl<'a> Span<'a> {
     /// Convert to a version without lifetimes. The conversion will also join
     /// any adjacent text spans and literal spans together.
@@ -291,6 +292,20 @@ impl<'a> Span<'a> {
                 to_owned_spans(spans)
             )
         }
+    }
+
+    /// This function will produce Undefined Behavior unless `original`
+    /// comes from the EXACT SAME allocated object as the string slice that
+    /// was passed to the parser.
+    /// 
+    /// This function may produce junk results unless `original` is a slice
+    /// over the same indices as the slice passed to the parser, or it may
+    /// return None.
+    /// 
+    /// This function will return None if the block or span only contains
+    /// static strings.
+    pub unsafe fn get_line_info(&self, original: &str) -> Option<LineInfo> {
+        self.into_line_info(original)
     }
 }
 
@@ -343,6 +358,154 @@ fn to_owned_spans(spans: &[Span]) -> Vec<OwnedSpan> {
     ret
 }
 
+macro_rules! variant_helper_impls {
+    ($name: ident, $is_name:ident, $matcher:pat, $ret:tt, $ret_type:ty) => {
+        #[doc="Returns true if this enum is in the "]
+        #[doc= stringify!($name)]
+        #[doc=" variant."]
+        #[allow(unused)]
+        #[allow(unused_parens)]
+        pub fn $is_name(&self) -> bool { matches!(self, $matcher) }
+
+        /// Returns the contents of the variant, if able.
+        #[allow(unused_parens)]
+        pub fn $name(&self) -> Result<$ret_type, String> {
+            if let $matcher = self {
+                Ok($ret)
+            } else {
+                Err(format!("Wrong variant {}: {:?}", stringify!($name), self))
+            }
+        }
+    };
+    ($is_name: ident, $matcher:pat) => {
+        #[doc="Returns true if this enum is in the "]
+        #[doc= stringify!($name)]
+        #[doc=" variant."]
+        #[allow(unused)]
+        pub fn $is_name(&self) -> bool { matches!(self, $matcher) }
+    }
+}
+
+impl<'a> Block<'a> {
+    variant_helper_impls!(header, is_header,
+        Block::Header(spans, level),
+        (spans, *level), (&[Span<'a>], usize));
+    variant_helper_impls!(paragraph, is_paragraph,
+        Block::Paragraph(spans),
+        spans, &[Span<'a>]);
+    variant_helper_impls!(block_quote, is_block_quote,
+        Block::Blockquote(blocks),
+        blocks, &[Block<'a>]);
+    variant_helper_impls!(code_block, is_code_block,
+        Block::CodeBlock(lang, lines),
+        (lang.clone(), lines), (Option<&'a str>, &[&'a str]));
+    variant_helper_impls!(link_reference, is_link_reference,
+        Block::LinkReference(id, url, title),
+        (id, url, title.clone()), (&str, &'a str, Option<&'a str>));
+    variant_helper_impls!(ordered_list, is_ordered_list,
+        Block::OrderedList(items, list_type),
+        (items, *list_type), (&[ListItem<'a>], OrderedListType));
+    variant_helper_impls!(is_hr, Block::Hr);
+    variant_helper_impls!(unordered_list, is_unordered_list,
+        Block::UnorderedList(items),
+        items, &[ListItem<'a>]);
+}
+
+impl<'a> ListItem<'a> {
+    variant_helper_impls!(simple, is_simple,
+        ListItem::Simple(spans), spans, &[Span<'a>]);
+    variant_helper_impls!(paragraph, is_paragraph,
+        ListItem::Paragraph(blocks), blocks, &[Block<'a>]);
+}
+
+impl<'a> Span<'a> {
+    variant_helper_impls!(is_break, Span::Break);
+    variant_helper_impls!(text, is_text,
+        Span::Text(text),
+        text, &'a str);
+    variant_helper_impls!(code, is_code,
+        Span::Code(code),
+        code, &'a str);
+    variant_helper_impls!(literal, is_literal,
+        Span::Literal(c),
+        (*c), char);
+    variant_helper_impls!(link, is_link,
+        Span::Link(spans, url, title),
+        (spans, url, title.clone()), (&[Span<'a>], &'a str, Option<&'a str>));
+    variant_helper_impls!(ref_link, is_ref_link,
+        Span::RefLink(spans, id),
+        (spans, id), (&[Span<'a>], &str));
+    variant_helper_impls!(image, is_image,
+        Span::Image(text, url, title),
+        (text, url, title.clone()), (&'a str, &'a str, Option<&'a str>));
+    variant_helper_impls!(emphasis, is_emphasis,
+        Span::Emphasis(spans),
+        spans, &[Span<'a>]);
+    variant_helper_impls!(strong, is_strong,
+        Span::Strong(spans),
+        spans, &[Span<'a>]);
+}
+
+impl OwnedBlock {
+    variant_helper_impls!(header, is_header,
+        OwnedBlock::Header(spans, level),
+        (spans, *level), (&[OwnedSpan], usize));
+    variant_helper_impls!(paragraph, is_paragraph,
+        OwnedBlock::Paragraph(spans),
+        spans, &[OwnedSpan]);
+    variant_helper_impls!(block_quote, is_block_quote,
+        OwnedBlock::Blockquote(blocks),
+        blocks, &[OwnedBlock]);
+    variant_helper_impls!(code_block, is_code_block,
+        OwnedBlock::CodeBlock(lang, lines),
+        (lang.as_ref().map(|s| s.as_str()), lines), (Option<&str>, &str));
+    variant_helper_impls!(link_reference, is_link_reference,
+        OwnedBlock::LinkReference(id, url, title),
+        (id, url, title.as_ref().map(|s| s.as_str())),
+        (&str, &str, Option<&str>));
+    variant_helper_impls!(ordered_list, is_ordered_list,
+        OwnedBlock::OrderedList(items, list_type),
+        (items, *list_type), (&[OwnedListItem], OrderedListType));
+    variant_helper_impls!(is_hr, OwnedBlock::Hr);
+    variant_helper_impls!(unordered_list, is_unordered_list,
+        OwnedBlock::UnorderedList(items),
+        items, &[OwnedListItem]);
+}
+
+impl OwnedListItem {
+    variant_helper_impls!(simple, is_simple,
+        OwnedListItem::Simple(spans), spans, &[OwnedSpan]);
+    variant_helper_impls!(paragraph, is_paragraph,
+        OwnedListItem::Paragraph(blocks), blocks, &[OwnedBlock]);
+}
+
+impl OwnedSpan {
+    variant_helper_impls!(is_break, OwnedSpan::Break);
+    variant_helper_impls!(text, is_text,
+        OwnedSpan::Text(text),
+        text, &str);
+    variant_helper_impls!(code, is_code,
+        OwnedSpan::Code(code),
+        code, &str);
+    variant_helper_impls!(link, is_link,
+        OwnedSpan::Link(spans, url, title),
+        (spans, url, title.as_ref().map(|s| s.as_str())),
+        (&[OwnedSpan], &str, Option<&str>));
+    variant_helper_impls!(ref_link, is_ref_link,
+        OwnedSpan::RefLink(spans, id),
+        (spans, id), (&[OwnedSpan], &str));
+    variant_helper_impls!(image, is_image,
+        OwnedSpan::Image(text, url, title),
+        (text, url, title.as_ref().map(|s| s.as_str())),
+        (&str, &str, Option<&str>));
+    variant_helper_impls!(emphasis, is_emphasis,
+        OwnedSpan::Emphasis(spans),
+        spans, &[OwnedSpan]);
+    variant_helper_impls!(strong, is_strong,
+        OwnedSpan::Strong(spans),
+        spans, &[OwnedSpan]);
+}
+
 #[test]
 fn test_span_simplify() {
     assert_eq!(
@@ -361,4 +524,94 @@ fn test_span_simplify() {
         to_owned_spans(&vec![Span::Text("he"), Span::Text("llo")]),
         vec![OwnedSpan::Text("hello".to_string())]
     );
+}
+
+#[test]
+fn test_line_numbers() {
+    let test_str = "*foo* *bar*\n\nfoo *baz*\ntest\n\n> foobar\n> foobaz *blam*\n\n----".to_string();
+    let tokens = parse(&test_str);
+
+    assert_eq!(tokens, vec![
+        Block::Paragraph(vec![
+            Span::Emphasis(vec![Span::Text("foo")]),
+            Span::Text(" "),
+            Span::Emphasis(vec![Span::Text("bar")])
+        ]),
+        Block::Paragraph(vec![
+            Span::Text("foo "),
+            Span::Emphasis(vec![Span::Text("baz")]),
+            Span::Text("\n"),
+            Span::Text("test"),
+        ]),
+        Block::Blockquote(vec![
+            Block::Paragraph(vec![
+                Span::Text("foobar"),
+                Span::Text("\n"),
+                Span::Text("foobaz "),
+                Span::Emphasis(vec![Span::Text("blam")])
+            ])
+        ]),
+        Block::Hr
+    ]);
+
+    assert_eq!(
+        tokens.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 0, start_char: 1,
+            end_line: 6, end_char: 14
+        })
+    );
+
+    let foo = &tokens[0].paragraph().unwrap()[0]
+        .emphasis().unwrap()[0];
+    assert_eq!(
+        foo.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 0, start_char: 1,
+            end_line: 0, end_char: 4
+        })
+    );
+    
+    let bar = &tokens[0].paragraph().unwrap()[2]
+        .emphasis().unwrap()[0];
+    assert_eq!(
+        bar.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 0, start_char: 7,
+            end_line: 0, end_char: 10
+        })
+    );
+    
+    let strong_bar = &tokens[0].paragraph().unwrap()[2];
+    assert_eq!(
+        strong_bar.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 0, start_char: 7,
+            end_line: 0, end_char: 10
+        })
+    );
+    
+    let foo_baz_test = &tokens[1];
+    assert_eq!(
+        foo_baz_test.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 2, start_char: 0,
+            end_line: 3, end_char: 4
+        })
+    );
+
+    let block_quote = &tokens[2];
+    assert_eq!(
+        block_quote.into_line_info(&test_str),
+        Some(LineInfo {
+            start_line: 5, start_char: 2,
+            end_line: 6, end_char: 14
+        })
+    );
+
+    let hr = &tokens[3];
+    assert_eq!(hr.into_line_info(&test_str), None);
+
+    let static_line_break = &tokens[1].paragraph().unwrap()[2];
+    assert_eq!(static_line_break.into_line_info(&test_str), None);
 }
